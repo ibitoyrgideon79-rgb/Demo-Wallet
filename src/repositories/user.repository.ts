@@ -54,7 +54,9 @@ export class UserRepository {
       bvn: input.bvn,
     });
 
-    const createdUser = await executor<UserRow>(this.tableName).where({ id: input.id }).first();
+    const createdUser = await executor<UserRow>(this.tableName)
+      .where({ id: input.id })
+      .first();
 
     if (!createdUser) {
       throw new Error("Failed to create user");
@@ -64,12 +66,18 @@ export class UserRepository {
   }
 
   async findUserById(id: string, executor: DbExecutor = db): Promise<UserModel | null> {
-    const user = await executor<UserRow>(this.tableName).where({ id }).first();
+    const user = await executor<UserRow>(this.tableName)
+      .where({ id })
+      .first();
+
     return user ? this.mapRowToModel(user) : null;
   }
 
   async findUserByEmail(email: string, executor: DbExecutor = db): Promise<UserModel | null> {
-    const user = await executor<UserRow>(this.tableName).where({ email }).first();
+    const user = await executor<UserRow>(this.tableName)
+      .where({ email })
+      .first();
+
     return user ? this.mapRowToModel(user) : null;
   }
 
@@ -77,12 +85,18 @@ export class UserRepository {
     phoneNumber: string,
     executor: DbExecutor = db,
   ): Promise<UserModel | null> {
-    const user = await executor<UserRow>(this.tableName).where({ phone_number: phoneNumber }).first();
+    const user = await executor<UserRow>(this.tableName)
+      .where({ phone_number: phoneNumber })
+      .first();
+
     return user ? this.mapRowToModel(user) : null;
   }
 
   async findUserByBvn(bvn: string, executor: DbExecutor = db): Promise<UserModel | null> {
-    const user = await executor<UserRow>(this.tableName).where({ bvn }).first();
+    const user = await executor<UserRow>(this.tableName)
+      .where({ bvn })
+      .first();
+
     return user ? this.mapRowToModel(user) : null;
   }
 }

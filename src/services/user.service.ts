@@ -31,19 +31,29 @@ export class UserService {
     await this.blacklistService.ensureUserIsNotBlacklisted(sanitizedInput.email);
     await this.blacklistService.ensureUserIsNotBlacklisted(sanitizedInput.phoneNumber);
 
-    return db.transaction(async (trx) => {
-      const user = await this.userRepository.createUser(
-        {
-          id: generateId(),
-          ...sanitizedInput,
-        },
-        trx,
-      );
+    try {
+      return await db.transaction(async (trx) => {
+        const user = await this.userRepository.createUser(
+          {
+            id: generateId(),
+            ...sanitizedInput,
+          },
+          trx,
+        );
 
-      const wallet = await this.createWalletForUser(user.id, trx);
+        const wallet = await this.createWalletForUser(user.id, trx);
 
-      return { user, wallet };
-    });
+        return { user, wallet };
+      });
+    } catch (error) {
+      const maybeDatabaseError = error as { code?: string };
+
+      if (maybeDatabaseError.code === "ER_DUP_ENTRY") {
+        throw new ConflictError("User with provided details already exists");
+      }
+
+      throw error;
+    }
   }
 
   async getUserById(userId: string): Promise<UserModel | null> {
