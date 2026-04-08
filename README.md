@@ -63,7 +63,7 @@ The codebase uses a layered structure:
 
 
 <h2>E-R Diagram</h2>
-<img src="./docs/erd.png" alt="E-R Diagram" width="900" />
+<img src=".docs\doc\demo-wallet_1.png alt="E-R Diagram" width="900" />
 
 
 ## API Endpoints
