@@ -23,6 +23,7 @@ This service supports:
 - Knex
 - MySQL
 - Jest
+- postman
 
 ## Architecture
 
