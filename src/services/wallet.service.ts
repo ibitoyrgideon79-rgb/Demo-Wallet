@@ -28,6 +28,7 @@ export class WalletService {
   async fundWallet(userId: string, input: FundWalletInput): Promise<WalletModel> {
     const amountMinor = toMinorUnits(input.amount);
     const description = input.description?.trim() || "Wallet funding";
+    const transactionReference = generateId();
 
     return db.transaction(async (trx) => {
       const wallet = await this.walletRepository.findWalletByUserIdForUpdate(userId, trx);
@@ -36,25 +37,23 @@ export class WalletService {
         throw new NotFoundError("Wallet not found");
       }
 
-      const updatedWallet = await this.walletRepository.updateWalletBalance(
-        wallet.id,
-        wallet.balanceMinor + amountMinor,
-        trx,
-      );
+      const balanceAfterMinor = wallet.balanceMinor + amountMinor;
 
       await this.walletRepository.createWalletTransaction(
         {
           id: generateId(),
           walletId: wallet.id,
-          transactionReference: generateId(),
+          transactionReference,
           type: "funding",
           amountMinor,
           balanceBeforeMinor: wallet.balanceMinor,
-          balanceAfterMinor: updatedWallet.balanceMinor,
+          balanceAfterMinor,
           description,
         },
         trx,
       );
+
+      const updatedWallet = await this.walletRepository.incrementWalletBalance(wallet.id, amountMinor, trx);
 
       return updatedWallet;
     });
@@ -63,6 +62,7 @@ export class WalletService {
   async withdrawFunds(userId: string, input: WithdrawFundsInput): Promise<WalletModel> {
     const amountMinor = toMinorUnits(input.amount);
     const description = input.description?.trim() || "Wallet withdrawal";
+    const transactionReference = generateId();
 
     return db.transaction(async (trx) => {
       const wallet = await this.walletRepository.findWalletByUserIdForUpdate(userId, trx);
@@ -74,26 +74,23 @@ export class WalletService {
       if (wallet.balanceMinor < amountMinor) {
         throw new BadRequestError("Insufficient wallet balance");
       }
-
-      const updatedWallet = await this.walletRepository.updateWalletBalance(
-        wallet.id,
-        wallet.balanceMinor - amountMinor,
-        trx,
-      );
+      const balanceAfterMinor = wallet.balanceMinor - amountMinor;
 
       await this.walletRepository.createWalletTransaction(
         {
           id: generateId(),
           walletId: wallet.id,
-          transactionReference: generateId(),
+          transactionReference,
           type: "withdrawal",
           amountMinor,
           balanceBeforeMinor: wallet.balanceMinor,
-          balanceAfterMinor: updatedWallet.balanceMinor,
+          balanceAfterMinor,
           description,
         },
         trx,
       );
+
+      const updatedWallet = await this.walletRepository.decrementWalletBalance(wallet.id, amountMinor, trx);
 
       return updatedWallet;
     });
@@ -109,13 +106,13 @@ export class WalletService {
     }
 
     return db.transaction(async (trx) => {
-      const senderWallet = await this.walletRepository.findWalletByUserIdForUpdate(userId, trx);
+      const senderWallet = await this.walletRepository.findWalletByUserId(userId, trx);
 
       if (!senderWallet) {
         throw new NotFoundError("Sender wallet not found");
       }
 
-      const recipientWallet = await this.walletRepository.findWalletByWalletNumberForUpdate(
+      const recipientWallet = await this.walletRepository.findWalletByWalletNumber(
         recipientWalletNumber,
         trx,
       );
@@ -128,34 +125,36 @@ export class WalletService {
         throw new ConflictError("You cannot transfer to your own wallet");
       }
 
-      if (senderWallet.balanceMinor < amountMinor) {
+      const lockedWallets = await this.walletRepository.findWalletsByIdsForUpdate(
+        [senderWallet.id, recipientWallet.id].sort(),
+        trx,
+      );
+
+      const lockedSenderWallet = lockedWallets.find((wallet) => wallet.id === senderWallet.id);
+      const lockedRecipientWallet = lockedWallets.find((wallet) => wallet.id === recipientWallet.id);
+
+      if (!lockedSenderWallet || !lockedRecipientWallet) {
+        throw new NotFoundError("Wallet not found during transfer");
+      }
+
+      if (lockedSenderWallet.balanceMinor < amountMinor) {
         throw new BadRequestError("Insufficient wallet balance");
       }
 
       const transactionReference = generateId();
-
-      const updatedSenderWallet = await this.walletRepository.updateWalletBalance(
-        senderWallet.id,
-        senderWallet.balanceMinor - amountMinor,
-        trx,
-      );
-
-      const updatedRecipientWallet = await this.walletRepository.updateWalletBalance(
-        recipientWallet.id,
-        recipientWallet.balanceMinor + amountMinor,
-        trx,
-      );
+      const senderBalanceAfterMinor = lockedSenderWallet.balanceMinor - amountMinor;
+      const recipientBalanceAfterMinor = lockedRecipientWallet.balanceMinor + amountMinor;
 
       await this.walletRepository.createWalletTransaction(
         {
           id: generateId(),
-          walletId: senderWallet.id,
+          walletId: lockedSenderWallet.id,
           transactionReference,
           type: "transfer_out",
           amountMinor,
-          balanceBeforeMinor: senderWallet.balanceMinor,
-          balanceAfterMinor: updatedSenderWallet.balanceMinor,
-          counterpartyWalletId: recipientWallet.id,
+          balanceBeforeMinor: lockedSenderWallet.balanceMinor,
+          balanceAfterMinor: senderBalanceAfterMinor,
+          counterpartyWalletId: lockedRecipientWallet.id,
           description,
         },
         trx,
@@ -164,17 +163,25 @@ export class WalletService {
       await this.walletRepository.createWalletTransaction(
         {
           id: generateId(),
-          walletId: recipientWallet.id,
+          walletId: lockedRecipientWallet.id,
           transactionReference,
           type: "transfer_in",
           amountMinor,
-          balanceBeforeMinor: recipientWallet.balanceMinor,
-          balanceAfterMinor: updatedRecipientWallet.balanceMinor,
-          counterpartyWalletId: senderWallet.id,
+          balanceBeforeMinor: lockedRecipientWallet.balanceMinor,
+          balanceAfterMinor: recipientBalanceAfterMinor,
+          counterpartyWalletId: lockedSenderWallet.id,
           description,
         },
         trx,
       );
+
+      const updatedSenderWallet = await this.walletRepository.decrementWalletBalance(
+        lockedSenderWallet.id,
+        amountMinor,
+        trx,
+      );
+
+      await this.walletRepository.incrementWalletBalance(lockedRecipientWallet.id, amountMinor, trx);
 
       return updatedSenderWallet;
     });

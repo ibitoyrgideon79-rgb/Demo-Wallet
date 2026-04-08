@@ -24,6 +24,8 @@ export async function up(knex: Knex): Promise<void> {
     table.foreign("user_id").references("id").inTable("users").onDelete("CASCADE");
   });
 
+  await knex.raw("ALTER TABLE wallets ADD CONSTRAINT chk_wallets_balance_non_negative CHECK (balance_minor >= 0)");
+
   await knex.schema.createTable("auth_tokens", (table) => {
     table.uuid("id").primary();
     table.uuid("user_id").notNullable();
@@ -56,6 +58,16 @@ export async function up(knex: Knex): Promise<void> {
     table.index(["wallet_id"]);
     table.index(["transaction_reference"]);
   });
+
+  await knex.raw(
+    "ALTER TABLE wallet_transactions ADD CONSTRAINT chk_wallet_transactions_amount_positive CHECK (amount_minor > 0)",
+  );
+  await knex.raw(
+    "ALTER TABLE wallet_transactions ADD CONSTRAINT chk_wallet_transactions_before_non_negative CHECK (balance_before_minor >= 0)",
+  );
+  await knex.raw(
+    "ALTER TABLE wallet_transactions ADD CONSTRAINT chk_wallet_transactions_after_non_negative CHECK (balance_after_minor >= 0)",
+  );
 }
 
 export async function down(knex: Knex): Promise<void> {

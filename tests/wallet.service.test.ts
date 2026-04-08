@@ -21,7 +21,7 @@ describe("WalletService", () => {
         createdAt: new Date(),
         updatedAt: new Date(),
       }),
-      updateWalletBalance: jest.fn().mockResolvedValue({
+      incrementWalletBalance: jest.fn().mockResolvedValue({
         id: "wallet-1",
         userId: "user-1",
         walletNumber: "1234567890",
@@ -38,6 +38,7 @@ describe("WalletService", () => {
 
     expect(result.balanceMinor).toBe(50000);
     expect(walletRepository.createWalletTransaction).toHaveBeenCalledTimes(1);
+    expect(walletRepository.incrementWalletBalance).toHaveBeenCalledWith("wallet-1", 50000, {});
   });
 
   it("prevents withdrawing above current balance", async () => {
@@ -76,8 +77,8 @@ describe("WalletService", () => {
     };
 
     const walletRepository = {
-      findWalletByUserIdForUpdate: jest.fn().mockResolvedValue(wallet),
-      findWalletByWalletNumberForUpdate: jest.fn().mockResolvedValue(wallet),
+      findWalletByUserId: jest.fn().mockResolvedValue(wallet),
+      findWalletByWalletNumber: jest.fn().mockResolvedValue(wallet),
     };
 
     const service = new WalletService(walletRepository as never);
@@ -89,7 +90,7 @@ describe("WalletService", () => {
 
   it("rejects transfers when recipient wallet does not exist", async () => {
     const walletRepository = {
-      findWalletByUserIdForUpdate: jest.fn().mockResolvedValue({
+      findWalletByUserId: jest.fn().mockResolvedValue({
         id: "wallet-1",
         userId: "user-1",
         walletNumber: "1234567890",
@@ -98,7 +99,7 @@ describe("WalletService", () => {
         createdAt: new Date(),
         updatedAt: new Date(),
       }),
-      findWalletByWalletNumberForUpdate: jest.fn().mockResolvedValue(null),
+      findWalletByWalletNumber: jest.fn().mockResolvedValue(null),
     };
 
     const service = new WalletService(walletRepository as never);
@@ -106,5 +107,53 @@ describe("WalletService", () => {
     await expect(
       service.transferFunds("user-1", { recipientWalletNumber: "0987654321", amount: 100 }),
     ).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("transfers funds by decrementing sender and incrementing recipient within a transaction", async () => {
+    const senderWallet = {
+      id: "wallet-1",
+      userId: "user-1",
+      walletNumber: "1234567890",
+      balanceMinor: 100000,
+      currency: "NGN",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const recipientWallet = {
+      id: "wallet-2",
+      userId: "user-2",
+      walletNumber: "0987654321",
+      balanceMinor: 10000,
+      currency: "NGN",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const walletRepository = {
+      findWalletByUserId: jest.fn().mockResolvedValue(senderWallet),
+      findWalletByWalletNumber: jest.fn().mockResolvedValue(recipientWallet),
+      findWalletsByIdsForUpdate: jest.fn().mockResolvedValue([senderWallet, recipientWallet]),
+      createWalletTransaction: jest.fn().mockResolvedValue(undefined),
+      decrementWalletBalance: jest.fn().mockResolvedValue({
+        ...senderWallet,
+        balanceMinor: 80000,
+      }),
+      incrementWalletBalance: jest.fn().mockResolvedValue({
+        ...recipientWallet,
+        balanceMinor: 30000,
+      }),
+    };
+
+    const service = new WalletService(walletRepository as never);
+    const result = await service.transferFunds("user-1", {
+      recipientWalletNumber: "0987654321",
+      amount: 200,
+    });
+
+    expect(result.balanceMinor).toBe(80000);
+    expect(walletRepository.createWalletTransaction).toHaveBeenCalledTimes(2);
+    expect(walletRepository.decrementWalletBalance).toHaveBeenCalledWith("wallet-1", 20000, {});
+    expect(walletRepository.incrementWalletBalance).toHaveBeenCalledWith("wallet-2", 20000, {});
   });
 });
